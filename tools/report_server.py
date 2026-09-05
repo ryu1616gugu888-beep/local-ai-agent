@@ -664,6 +664,44 @@ async def _synthesize_report_by_section(
     return "\n\n".join(part.strip() for part in parts if part.strip())
 
 
+# ---------- 配信時刻の制御 ----------
+
+# 自動配信をこの時刻ちょうどにVaultへ書き出す(launchdはこれより前に起動させる)。
+# 収集とGemini生成に十数分かかるようになったため、生成完了と配信時刻を分離した。
+# 生成が早く終わってもここまで待ってから書き出すので、Obsidian(LiveSync)経由で
+# iPhoneに届くタイミングが毎回ほぼ一定になる。
+_DELIVERY_TIME = {
+    "scheduled_morning": (8, 0),
+    "scheduled_evening": (20, 0),
+    "weekly": (20, 30),
+}
+
+# 待機時間の上限。想定より大幅に早く起動した場合(手動実行など)に何時間も
+# 待ち続けないための安全弁。これを超える場合は待たずに即書き出す。
+_MAX_DELIVERY_WAIT_SEC = 2 * 60 * 60
+
+
+async def _wait_until_delivery(mode: str) -> None:
+    """配信予定時刻まで待つ。既に過ぎていれば待たずに戻る。"""
+    target = _DELIVERY_TIME.get(mode)
+    if target is None:
+        return
+    hour, minute = target
+    now = datetime.now()
+    deliver_at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    wait = (deliver_at - now).total_seconds()
+    if wait <= 0:
+        logging.info("配信時刻 %02d:%02d を過ぎているため即座に書き出します", hour, minute)
+        return
+    if wait > _MAX_DELIVERY_WAIT_SEC:
+        logging.warning(
+            "配信時刻まで%.0f分あり上限を超えるため待機せず書き出します", wait / 60
+        )
+        return
+    logging.info("生成完了。配信時刻 %02d:%02d まで %.0f秒待機します", hour, minute, wait)
+    await asyncio.sleep(wait)
+
+
 # ---------- Obsidian Vaultへの書き出し ----------
 
 def _write_note(date: datetime, title: str, body_text: str, is_weekly: bool = False) -> Path:
@@ -820,6 +858,8 @@ async def generate_report(mode: str = "manual", topic: str = "") -> str:
         "scheduled_evening": "夕刊レポート",
         "weekly": "週次まとめ",
     }.get(mode, mode)
+    # 生成の所要時間に関わらず、配信時刻ちょうどにVaultへ現れるようにする。
+    await _wait_until_delivery(mode)
     dest = _write_note(datetime.now(), title, report_text, is_weekly=(mode == "weekly"))
     return f"レポートを生成しました: {dest}"
 
