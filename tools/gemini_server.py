@@ -39,6 +39,31 @@ MAX_INLINE_FILE_BYTES = 15 * 1024 * 1024  # inline_dataはbase64化で約1.33倍
 mcp = MCPServer("gemini")
 
 
+def _redact(message: str) -> str:
+    """エラーメッセージに混ざり得るAPIキーを伏せる。
+
+    このメッセージはレポート本文としてObsidianに書き出され、iPhoneまで
+    同期される経路にあるため、素通しにしない。
+    """
+    return message.replace(API_KEY, "***APIキー***") if API_KEY else message
+
+
+def _is_daily_quota_error(resp) -> bool:
+    """429が「1日あたりの上限」によるものかを判定する。
+
+    レスポンスのquotaIdが GenerateRequestsPerDayPerProjectPerModel-FreeTier の
+    ような PerDay を含む名前になっている場合、待っても当日中は回復しない。
+    """
+    try:
+        for detail in resp.json().get("error", {}).get("details", []):
+            for violation in detail.get("violations", []):
+                if "PerDay" in (violation.get("quotaId") or ""):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def _call_gemini(parts: list[dict], timeout: int = TIMEOUT_SEC, max_answer_chars: int = MAX_ANSWER_CHARS) -> str:
     if not API_KEY:
         return "エラー: GEMINI_API_KEYが設定されていません。"
@@ -64,8 +89,16 @@ def _call_gemini(parts: list[dict], timeout: int = TIMEOUT_SEC, max_answer_chars
                 },
                 timeout=timeout,
             )
-            # 429(レート制限)は無料枠のRPM/TPM超過で出る。4秒待って再送しても
-            # 同じ分の枠を叩くだけなので、503とは別に指数バックオフで待つ。
+            # 429には2種類あり、扱いを分けないと事故る。
+            #   - 1分あたりの上限(RPM/TPM): 待てば回復するのでバックオフして再送する
+            #   - 1日あたりの上限(RPD)    : 待っても回復しない。にもかかわらず再送すると
+            #     残りの回数を消費し、他の機能(チャットのask_gemini等)まで巻き添えで
+            #     使えなくする。無料枠のgemini-3.5-flashは1日20回しかないため影響が大きい。
+            if resp.status_code == 429 and _is_daily_quota_error(resp):
+                return _redact(
+                    "Gemini APIエラー: 1日あたりの無料枠を使い切りました"
+                    "(リトライしても回復しないため即座に中止しました)。"
+                )
             if resp.status_code == 429 and not is_last:
                 # 倍増させるが上限を設ける。上限なしにすると 30→60→120→240秒 で
                 # 1回の失敗に7分以上かかり、レポート全体が1時間近くかかってしまう。
@@ -84,11 +117,7 @@ def _call_gemini(parts: list[dict], timeout: int = TIMEOUT_SEC, max_answer_chars
             if getattr(e, "response", None) is not None:
                 detail = f" ({e.response.text[:300]})"
             # ヘッダ認証に変えた後もURL以外の経路でキーが混ざる可能性を潰しておく。
-            # このメッセージはレポート本文としてObsidianに書き出され得るため。
-            message = f"Gemini APIエラー({MAX_RETRIES}回試行): {e}{detail}"
-            if API_KEY:
-                message = message.replace(API_KEY, "***APIキー***")
-            return message
+            return _redact(f"Gemini APIエラー({MAX_RETRIES}回試行): {e}{detail}")
 
     data = resp.json()
     try:
