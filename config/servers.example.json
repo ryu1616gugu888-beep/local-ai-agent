@@ -1,0 +1,112 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/luca"
+      ]
+    },
+    "bash": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/bash_server.py"
+      ]
+    },
+    "web": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/web_server.py"
+      ]
+    },
+    "memory": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/memory_server.py"
+      ]
+    },
+    "browser": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/browser_server.py"
+      ]
+    },
+    "gemini": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/gemini_server.py"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "YOUR_GEMINI_API_KEY_HERE"
+      }
+    },
+    "computer": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/computer_server.py"
+      ]
+    },
+    "notebooklm": {
+      "command": "/Users/luca/.local/bin/notebooklm-mcp",
+      "args": [],
+      "tools": [
+        "notebook_list",
+        "notebook_create",
+        "notebook_query",
+        "source_add",
+        "chat_get"
+      ]
+    },
+    "notion": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "easy-notion-mcp"
+      ],
+      "env": {
+        "NOTION_TOKEN": "YOUR_NOTION_TOKEN_HERE"
+      },
+      "tools": [
+        "search",
+        "read_page",
+        "create_page",
+        "append_content",
+        "list_databases",
+        "query_database",
+        "add_database_entry",
+        "list_pages"
+      ]
+    },
+    "perplexity": {
+      "command": "/Users/luca/.local/bin/perplexity-mcp",
+      "env": {
+        "PERPLEXITY_COOKIES": "YOUR_PERPLEXITY_COOKIES_HERE"
+      }
+    },
+    "slides": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/slides_server.py"
+      ]
+    },
+    "gmail": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/gmail_server.py"
+      ]
+    },
+    "news": {
+      "command": "/Users/luca/local-ai-agent/venv/bin/python3",
+      "args": [
+        "/Users/luca/local-ai-agent/tools/report_server.py"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "YOUR_GEMINI_API_KEY_HERE"
+      },
+      "tools": [
+        "generate_report"
+      ]
+    }
+  }
+}

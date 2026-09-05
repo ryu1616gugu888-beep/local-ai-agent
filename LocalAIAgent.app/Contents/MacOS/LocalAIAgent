@@ -1,0 +1,24 @@
+#!/bin/bash
+# ローカルAIエージェントを起動し、ブラウザで開くランチャー。
+# サーバーが既に起動していればそのまま開くだけ。
+
+PROJECT_DIR="$HOME/local-ai-agent"
+PORT=8420
+URL="http://127.0.0.1:$PORT"
+LOG="$PROJECT_DIR/data/webapp.log"
+
+mkdir -p "$PROJECT_DIR/data"
+
+if ! curl -s -o /dev/null "$URL"; then
+  cd "$PROJECT_DIR" || exit 1
+  source venv/bin/activate
+  nohup "$PROJECT_DIR/venv/bin/uvicorn" webapp:app --host 127.0.0.1 --port "$PORT" > "$LOG" 2>&1 &
+  disown
+
+  for _ in $(seq 1 30); do
+    curl -s -o /dev/null "$URL" && break
+    sleep 0.5
+  done
+fi
+
+open -a "$HOME/Applications/Agent .app"

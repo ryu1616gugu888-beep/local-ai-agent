@@ -1,0 +1,1505 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Agent</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --bg-alt: #151515;
+    --panel: #1f1f1f;
+    --border: #2e2e2e;
+    --border-soft: #262626;
+    --text: #e8e6e3;
+    --text-dim: #8a8a86;
+    --accent: #d97757;
+    --accent-dim: #a35940;
+    --accent-soft: rgba(217, 119, 87, 0.12);
+    --danger: #e5685c;
+    --code-bg: #111111;
+    --inline-code: #f0c4a8;
+  }
+  body.theme-light {
+    --bg: #ffffff;
+    --bg-alt: #f6f6f5;
+    --panel: #f1f1f0;
+    --border: #e3e3e1;
+    --border-soft: #ececea;
+    --text: #22221f;
+    --text-dim: #74746e;
+    --accent: #c1633f;
+    --accent-dim: #a35940;
+    --accent-soft: rgba(193, 99, 63, 0.10);
+    --danger: #c23b2f;
+    --code-bg: #f2f1ee;
+    --inline-code: #9a4a25;
+  }
+  * { box-sizing: border-box; }
+  html { height: 100%; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Hiragino Sans", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    height: 100dvh; /* iOS Safariのツールバー分の誤差(100vhだと最下部が隠れる)を補正 */
+    height: var(--app-height, 100dvh); /* ソフトキーボード開閉時、dvhの再計算がズレることがあるためJSで上書きする */
+    /* min-height: 100vhは意図的に外している。キーボード表示時にheightが縮んでも
+       min-heightがそれより大きい固定値のままだと縮小が無効化され、表示が崩れるため。 */
+    display: flex;
+    overflow: hidden;
+    transition: background-color 0.15s, color 0.15s;
+  }
+  code, pre, .mono { font-family: "SF Mono", "Menlo", "Consolas", monospace; }
+
+  /* ---------- サイドバー ---------- */
+  #sidebar {
+    width: 250px;
+    background: var(--bg-alt);
+    color: var(--text);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    transition: width 0.15s ease, border-color 0.15s;
+    overflow: hidden;
+  }
+  #sidebar.collapsed {
+    width: 0;
+    border-right: none;
+  }
+  #sidebar > * { flex-shrink: 0; }
+  #conversation-list { min-height: 0; }
+  #sidebar-head {
+    padding: 14px 14px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  #sidebar-head .prompt-line {
+    font-size: 11px;
+    color: var(--accent);
+    opacity: 0.85;
+    margin-bottom: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #new-chat-btn {
+    width: 100%;
+    padding: 9px 10px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent-dim);
+    border-radius: 4px;
+    font-size: 12.5px;
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  #new-chat-btn:hover { background: var(--accent-soft); }
+  #conversation-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 8px;
+  }
+  .conv-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    margin-bottom: 1px;
+    border-left: 2px solid transparent;
+  }
+  .conv-item:hover { background: var(--panel); color: var(--text); }
+  .conv-item.active {
+    background: var(--panel);
+    color: var(--text);
+    border-left: 2px solid var(--accent);
+  }
+  .conv-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .conv-title::before { content: "# "; color: var(--text-dim); }
+  .conv-delete {
+    opacity: 0;
+    color: var(--danger);
+    font-size: 12px;
+    padding: 2px 6px;
+  }
+  .conv-item:hover .conv-delete { opacity: 1; }
+  #sidebar-foot {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 10.5px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  /* ---------- メイン ---------- */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+    background: var(--bg);
+  }
+  #topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 24px;
+    border-bottom: 1px solid var(--border);
+    gap: 10px;
+  }
+  #topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  #topbar-right { display: flex; align-items: center; gap: 8px; position: relative; }
+  #sidebar-toggle, #settings-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    width: 30px; height: 30px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  #sidebar-toggle:hover, #settings-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  #settings-panel {
+    position: absolute;
+    top: 40px; right: 0;
+    width: 240px;
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    z-index: 30;
+    display: none;
+  }
+  #settings-panel.open { display: block; }
+  #settings-panel h4 {
+    margin: 0 0 10px; font-size: 11.5px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .settings-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 13px; padding: 6px 0;
+  }
+  .switch {
+    position: relative; width: 36px; height: 20px;
+    background: var(--border); border-radius: 999px; cursor: pointer;
+    flex-shrink: 0; transition: background 0.15s;
+  }
+  .switch.on { background: var(--accent); }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: #fff;
+    transition: left 0.15s;
+  }
+  .switch.on::after { left: 18px; }
+  #model-select {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    max-width: 300px;
+  }
+  #model-select:hover { border-color: var(--accent); }
+  #model-select:focus { outline: none; border-color: var(--accent); }
+  #tools-toggle {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, monospace;
+    cursor: pointer;
+  }
+  #tools-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------- メッセージ(一続きのターミナル表示) ---------- */
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 26px 30px 10px;
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  .empty-state {
+    color: var(--text-dim);
+    text-align: center;
+    font-size: 13px;
+    font-family: "SF Mono", Menlo, monospace;
+    padding: 60px 0;
+  }
+
+  .msg { padding: 12px 0; font-size: 14px; line-height: 1.7; }
+
+  .msg-user { display: flex; flex-direction: column; }
+  .msg-user-main { display: flex; gap: 10px; }
+  .msg-user .marker {
+    color: var(--accent);
+    font-family: "SF Mono", Menlo, monospace;
+    font-weight: 700;
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .msg-user .body { white-space: pre-wrap; word-break: break-word; color: var(--text); }
+
+  .msg-ai .body {
+    border-left: 2px solid var(--border-soft);
+    padding-left: 16px;
+    color: var(--text);
+  }
+
+  .msg-ai .body p { margin: 0 0 10px; }
+  .msg-ai .body p:last-child { margin-bottom: 0; }
+  .msg-ai .body h1, .msg-ai .body h2, .msg-ai .body h3, .msg-ai .body h4 { margin: 16px 0 8px; line-height: 1.3; }
+  .msg-ai .body h1:first-child, .msg-ai .body h2:first-child, .msg-ai .body h3:first-child { margin-top: 0; }
+  .msg-ai .body h1 { font-size: 18px; }
+  .msg-ai .body h2 { font-size: 16px; }
+  .msg-ai .body h3 { font-size: 14.5px; color: var(--accent); }
+  .msg-ai .body ul, .msg-ai .body ol { margin: 6px 0 10px; padding-left: 22px; }
+  .msg-ai .body li { margin: 3px 0; }
+  .msg-ai .body blockquote {
+    margin: 8px 0; padding: 4px 12px;
+    border-left: 3px solid var(--accent); color: var(--text-dim);
+  }
+  .msg-ai .body a { color: var(--accent); }
+  .msg-ai .body code {
+    background: var(--panel); border: 1px solid var(--border-soft);
+    padding: 1px 5px; border-radius: 4px;
+    font-size: 12.5px; color: var(--inline-code);
+  }
+  .msg-ai .body pre.code-block {
+    background: var(--code-bg); color: var(--text);
+    border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+    margin: 8px 0; font-size: 12.5px; border: 1px solid var(--border);
+  }
+  .msg-ai .body pre.code-block code { background: none; padding: 0; color: inherit; }
+  .table-wrap { overflow-x: auto; margin: 8px 0; }
+  .msg-ai .body table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .msg-ai .body th, .msg-ai .body td {
+    border: 1px solid var(--border); padding: 6px 10px; text-align: left;
+  }
+  .msg-ai .body th { background: var(--panel); font-weight: 600; }
+
+  .msg-tool {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px;
+  }
+  .msg-tool .tool-line {
+    color: var(--accent-dim);
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+  .msg-tool .tool-line .bullet { color: var(--accent); }
+  .msg-tool .tool-result {
+    margin: 6px 0 0 16px;
+    padding: 8px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  /* ---------- 添付カード ---------- */
+  .attach-card {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 10px 5px 5px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    max-width: 220px;
+  }
+  .attach-card .thumb {
+    width: 34px; height: 34px; border-radius: 6px; object-fit: cover;
+    flex-shrink: 0; background: var(--code-bg);
+  }
+  .attach-card .icon {
+    width: 34px; height: 34px; border-radius: 6px; background: var(--code-bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0; color: var(--accent);
+    font-family: "SF Mono", Menlo, monospace; font-weight: 700;
+  }
+  .attach-card .name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: "SF Mono", Menlo, monospace; color: var(--text);
+  }
+  .attach-card .remove {
+    cursor: pointer; color: var(--danger); font-weight: bold;
+    margin-left: auto; flex-shrink: 0; padding-left: 4px;
+  }
+  .sent-attachments {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 8px; margin-left: 24px;
+  }
+
+  .suggestions {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin: 12px 0 4px 16px;
+  }
+  .suggestion-chip {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 7px 14px;
+    font-size: 12.5px;
+    cursor: pointer;
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    text-align: left;
+  }
+  .suggestion-chip:hover { background: var(--accent); color: #1a1210; }
+
+  /* ---------- 入力エリア ---------- */
+  #input-area {
+    padding: 10px 30px 22px;
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
+  }
+  #attachment-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  #command-hint {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    padding: 0 4px;
+  }
+  #command-hint .cmd { color: var(--accent); font-family: "SF Mono", Menlo, monospace; }
+  #command-autocomplete {
+    display: none;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    margin-bottom: 6px;
+    overflow: hidden;
+  }
+  #command-autocomplete.open { display: flex; }
+  #command-autocomplete .cmd-item {
+    padding: 8px 12px;
+    font-size: 13px;
+    font-family: "SF Mono", Menlo, monospace;
+    cursor: pointer;
+    color: var(--text);
+  }
+  #command-autocomplete .cmd-item:hover,
+  #command-autocomplete .cmd-item.active { background: var(--accent-soft); color: var(--accent); }
+  #main.drag-over::after {
+    content: "ここにファイルをドロップ";
+    position: absolute; inset: 0;
+    background: var(--accent-soft);
+    border: 2px dashed var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-family: "SF Mono", Menlo, monospace; color: var(--accent);
+    font-size: 14px; z-index: 15; pointer-events: none;
+  }
+
+  #input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: var(--panel);
+    transition: border-color 0.15s;
+  }
+  #input-row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #input-row .prompt-marker {
+    font-family: "SF Mono", Menlo, monospace;
+    color: var(--accent);
+    padding: 8px 0 8px 2px;
+    flex-shrink: 0;
+  }
+  #attach-btn {
+    flex-shrink: 0;
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    font-size: 16px;
+    cursor: pointer;
+    color: var(--text-dim);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #input-box {
+    flex: 1;
+    resize: none;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    padding: 7px 4px;
+    font-size: 14px;
+    font-family: -apple-system, "Hiragino Sans", sans-serif;
+    max-height: 160px;
+  }
+  #input-box:focus { outline: none; }
+  #send-btn {
+    background: var(--accent);
+    color: #1a1210;
+    border: none;
+    border-radius: 8px;
+    padding: 0 18px;
+    height: 32px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  #send-btn:disabled { opacity: 0.4; cursor: default; }
+  #send-btn.stop-mode { background: var(--danger); color: #fff; }
+  #input-box:disabled { opacity: 0.6; }
+  #status-bar {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--accent-dim);
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 30px;
+    height: 18px;
+  }
+
+  /* ---------- ツールパネル ---------- */
+  #tools-panel {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 340px;
+    background: var(--bg-alt);
+    color: var(--text);
+    border-left: 1px solid var(--border);
+    transform: translateX(100%);
+    transition: transform 0.2s ease;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  #tools-panel.open { transform: translateX(0); }
+  #tools-panel-head {
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #tools-panel-head h3 { margin: 0; font-size: 13px; color: var(--accent); font-weight: 600; }
+  #tools-panel-close { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 16px; }
+  #tools-list { flex: 1; overflow-y: auto; padding: 10px 14px; }
+  .tool-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .tool-card .tool-name { color: var(--accent); font-size: 12.5px; font-weight: 600; }
+  .tool-card .tool-desc { color: var(--text-dim); font-size: 11px; margin-top: 4px; line-height: 1.5; }
+  .tool-card .tool-run-toggle {
+    margin-top: 8px; background: none; border: 1px solid var(--border);
+    color: var(--text); font-size: 10.5px; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+  }
+  .tool-card .tool-run-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .tool-run-box { display: none; margin-top: 8px; }
+  .tool-run-box.open { display: block; }
+  .tool-run-box textarea {
+    width: 100%; background: var(--code-bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    font-family: inherit; font-size: 11px; padding: 6px; resize: vertical;
+    min-height: 50px;
+  }
+  .tool-run-box button {
+    margin-top: 6px; background: var(--accent); color: #1a1210; border: none;
+    border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; font-weight: 600;
+  }
+  .tool-empty { color: var(--text-dim); font-size: 11.5px; padding: 8px 2px; }
+
+  #tools-add {
+    border-top: 1px solid var(--border);
+    padding: 14px;
+    flex-shrink: 0;
+  }
+  #tools-add h4 {
+    margin: 0 0 10px; font-size: 11.5px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  #tools-add input {
+    width: 100%; background: var(--code-bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    font-family: inherit; font-size: 11.5px; padding: 7px 8px;
+    margin-bottom: 6px;
+  }
+  #tools-add input:focus { outline: none; border-color: var(--accent); }
+  #tool-add-submit {
+    width: 100%; background: var(--accent); color: #1a1210; border: none;
+    border-radius: 4px; padding: 7px; font-size: 11.5px; cursor: pointer; font-weight: 600;
+  }
+  #tool-add-status { font-size: 11px; margin-top: 8px; line-height: 1.5; }
+  #tool-add-status.error { color: var(--danger); }
+  #tool-add-status.ok { color: var(--accent); }
+
+  #file-input { display: none; }
+
+  /* ---------- スマホ幅対応 ---------- */
+  @media (max-width: 680px) {
+    #sidebar {
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      z-index: 40;
+      box-shadow: 0 0 24px rgba(0,0,0,0.4);
+    }
+    #sidebar-head { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+    #topbar { padding: calc(8px + env(safe-area-inset-top, 0px)) 14px 8px; }
+    #messages { padding: 18px 14px 10px; }
+    #input-area {
+      padding: 8px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    #status-bar { padding: 0 14px; }
+    #sidebar-toggle, #settings-toggle {
+      width: 38px; height: 38px; font-size: 15px;
+    }
+    #attach-btn { width: 38px; height: 38px; font-size: 18px; }
+    #send-btn { height: 38px; padding: 0 16px; }
+    #input-box { font-size: 16px; } /* 16px未満だとiOS Safariが自動ズームする */
+    #settings-panel { width: min(240px, calc(100vw - 24px)); }
+    #tools-panel { width: 100vw; }
+    /* モデル名が長いとTools/設定ボタンと重なるため、縮めて省略表示にする */
+    #topbar-left { min-width: 0; flex-shrink: 1; }
+    #model-select {
+      min-width: 0;
+      max-width: 40vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div id="sidebar-head">
+    <div class="prompt-line">~/local-ai-agent $ chat</div>
+    <button id="new-chat-btn">+ new_conversation()</button>
+  </div>
+  <div id="conversation-list"></div>
+  <div id="sidebar-foot"><span class="status-dot"></span> qwen2.5-14b · online</div>
+</div>
+
+<div id="main">
+  <div id="topbar">
+    <div id="topbar-left">
+      <button id="sidebar-toggle" title="サイドバーの表示切替">☰</button>
+      <select id="model-select"></select>
+    </div>
+    <div id="topbar-right">
+      <button id="tools-toggle">Tools <span id="tools-count"></span></button>
+      <button id="settings-toggle" title="設定">⚙</button>
+      <div id="settings-panel">
+        <h4>表示設定</h4>
+        <div class="settings-row">
+          <span>ライトモード(白背景)</span>
+          <div class="switch" id="theme-switch"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="messages"><div class="empty-state">Start a conversation from "+ new_conversation()" on the left</div></div>
+
+  <div id="status-bar"></div>
+  <div id="input-area">
+    <div id="attachment-tray"></div>
+    <div id="command-autocomplete"></div>
+    <div id="input-row">
+      <button id="attach-btn" title="ファイルを添付">＋</button>
+      <textarea id="input-box" rows="1" placeholder="メッセージを入力... (Enterで改行 / Enterを2回連続で送信)"></textarea>
+      <button id="send-btn">send</button>
+    </div>
+    <div id="command-hint"></div>
+    <input type="file" id="file-input" multiple />
+  </div>
+
+  <div id="tools-panel">
+    <div id="tools-panel-head">
+      <h3>接続中のMCPツール</h3>
+      <button id="tools-panel-close">✕</button>
+    </div>
+    <div id="tools-list"></div>
+    <div id="tools-add">
+      <h4>+ 新しいツールを追加</h4>
+      <input type="text" id="tool-add-name" placeholder="名前 (例: filesystem)" />
+      <input type="text" id="tool-add-command" placeholder="コマンド (例: npx)" />
+      <input type="text" id="tool-add-args" placeholder="引数 (例: -y @modelcontextprotocol/server-filesystem /path)" />
+      <button id="tool-add-submit">接続する</button>
+      <div id="tool-add-status"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentConvId = null;
+let sending = false;
+let pendingAttachments = []; // {filename, is_text, preview}
+let availableModels = [];
+let conversationModels = {}; // conv_id -> model
+let availableCommands = []; // /コマンドとして呼べるオンデマンドサーバー名
+let commandMatches = [];
+let activeCommandIndex = -1;
+let autocompleteOpen = false;
+
+const listEl = document.getElementById('conversation-list');
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input-box');
+const sendBtn = document.getElementById('send-btn');
+const statusBar = document.getElementById('status-bar');
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file-input');
+const attachmentTray = document.getElementById('attachment-tray');
+const toolsToggle = document.getElementById('tools-toggle');
+const toolsPanel = document.getElementById('tools-panel');
+const toolsList = document.getElementById('tools-list');
+const toolsCount = document.getElementById('tools-count');
+const modelSelect = document.getElementById('model-select');
+const sidebarEl = document.getElementById('sidebar');
+const sidebarToggle = document.getElementById('sidebar-toggle');
+const settingsToggle = document.getElementById('settings-toggle');
+const settingsPanel = document.getElementById('settings-panel');
+const themeSwitch = document.getElementById('theme-switch');
+const mainEl = document.getElementById('main');
+
+async function fetchJSON(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(await res.text());
+  return res.status === 204 ? null : res.json();
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+/* ---------- 簡易Markdownレンダラー(オフライン・依存なし) ---------- */
+function renderInline(text) {
+  let s = escapeHtml(text);
+  const codeSpans = [];
+  s = s.replace(/`([^`]+)`/g, (_, code) => {
+    codeSpans.push(code);
+    return ` ${codeSpans.length - 1} `;
+  });
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+  s = s.replace(/ (\d+) /g, (_, i) => `<code>${codeSpans[Number(i)]}</code>`);
+  return s;
+}
+
+function renderMarkdown(md) {
+  const lines = md.replace(/\r\n/g, '\n').split('\n');
+  let html = '';
+  let i = 0;
+  let paragraphBuf = [];
+
+  function flushParagraph() {
+    if (paragraphBuf.length) {
+      html += `<p>${paragraphBuf.map(renderInline).join('<br>')}</p>`;
+      paragraphBuf = [];
+    }
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fenceMatch = line.match(/^```(\w*)\s*$/);
+    if (fenceMatch) {
+      flushParagraph();
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) { codeLines.push(lines[i]); i++; }
+      i++;
+      html += `<pre class="code-block"><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`;
+      continue;
+    }
+
+    if (/^\|.*\|\s*$/.test(line) && lines[i + 1] && /^\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
+      flushParagraph();
+      const headerCells = line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) {
+        rows.push(lines[i].trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+        i++;
+      }
+      html += '<div class="table-wrap"><table><thead><tr>' +
+        headerCells.map(c => `<th>${renderInline(c)}</th>`).join('') +
+        '</tr></thead><tbody>' +
+        rows.map(r => `<tr>${r.map(c => `<td>${renderInline(c)}</td>`).join('')}</tr>`).join('') +
+        '</tbody></table></div>';
+      continue;
+    }
+
+    const headerMatch = line.match(/^(#{1,4})\s+(.*)$/);
+    if (headerMatch) {
+      flushParagraph();
+      const level = headerMatch[1].length;
+      html += `<h${level}>${renderInline(headerMatch[2])}</h${level}>`;
+      i++;
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      flushParagraph();
+      const quoteLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) { quoteLines.push(lines[i].replace(/^>\s?/, '')); i++; }
+      html += `<blockquote>${quoteLines.map(renderInline).join('<br>')}</blockquote>`;
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      flushParagraph();
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, '')); i++; }
+      html += `<ul>${items.map(it => `<li>${renderInline(it)}</li>`).join('')}</ul>`;
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      flushParagraph();
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+\.\s+/, '')); i++; }
+      html += `<ol>${items.map(it => `<li>${renderInline(it)}</li>`).join('')}</ol>`;
+      continue;
+    }
+
+    if (line.trim() === '') { flushParagraph(); i++; continue; }
+
+    paragraphBuf.push(line);
+    i++;
+  }
+  flushParagraph();
+  return html;
+}
+
+/* ---------- 添付ファイルの種類判定・カード生成 ---------- */
+function fileKind(filename) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image';
+  if (ext === 'pdf') return 'pdf';
+  return 'file';
+}
+
+function buildAttachCard(att) {
+  const card = document.createElement('div');
+  card.className = 'attach-card';
+  if (att.kind === 'image' && att.objectUrl) {
+    card.innerHTML = `<img class="thumb" src="${att.objectUrl}">`;
+  } else if (att.kind === 'pdf') {
+    card.innerHTML = `<div class="icon">PDF</div>`;
+  } else {
+    card.innerHTML = `<div class="icon">FILE</div>`;
+  }
+  const name = document.createElement('span');
+  name.className = 'name';
+  name.textContent = att.filename;
+  card.appendChild(name);
+  return card;
+}
+
+/* ---------- メッセージ描画(一続きのターミナル形式) ---------- */
+function addUserMsg(text, attachments) {
+  const row = document.createElement('div');
+  row.className = 'msg msg-user';
+
+  const main = document.createElement('div');
+  main.className = 'msg-user-main';
+  main.innerHTML = `<span class="marker">&gt;</span><div class="body"></div>`;
+  main.querySelector('.body').textContent = text;
+  row.appendChild(main);
+
+  if (attachments && attachments.length) {
+    const tray = document.createElement('div');
+    tray.className = 'sent-attachments';
+    attachments.forEach(a => tray.appendChild(buildAttachCard(a)));
+    row.appendChild(tray);
+  }
+
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function parseSuggestions(text) {
+  const re = /\n?SUGGESTED_QUESTIONS:\s*\n((?:\s*-\s*.+\n?)+)/i;
+  const match = text.match(re);
+  if (!match) return { mainText: text, suggestions: [] };
+  const mainText = text.slice(0, match.index).trimEnd();
+  const suggestions = match[1]
+    .split('\n')
+    .map(l => l.replace(/^\s*-\s*/, '').trim())
+    .filter(Boolean);
+  return { mainText, suggestions };
+}
+
+function addAiMsg(markdownText) {
+  const { mainText, suggestions } = parseSuggestions(markdownText);
+  const row = document.createElement('div');
+  row.className = 'msg msg-ai';
+  row.innerHTML = `<div class="body">${renderMarkdown(mainText)}</div>`;
+
+  if (suggestions.length) {
+    const tray = document.createElement('div');
+    tray.className = 'suggestions';
+    suggestions.forEach(q => {
+      const chip = document.createElement('button');
+      chip.className = 'suggestion-chip';
+      chip.textContent = q;
+      chip.onclick = () => {
+        if (sending) return;
+        inputEl.value = q;
+        sendMessage();
+      };
+      tray.appendChild(chip);
+    });
+    row.appendChild(tray);
+  }
+
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function addToolMsg(label, resultText) {
+  const row = document.createElement('div');
+  row.className = 'msg msg-tool';
+  row.innerHTML = `<div class="tool-line"><span class="bullet">●</span><span>${escapeHtml(label)}</span></div>` +
+    (resultText != null ? `<div class="tool-result">${escapeHtml(resultText)}</div>` : '');
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return row;
+}
+
+function appendToolResult(row, resultText) {
+  if (!row) return;
+  const div = document.createElement('div');
+  div.className = 'tool-result';
+  div.textContent = resultText;
+  row.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+/* ---------- ストリーミング中のAI応答バブル ---------- */
+function beginStreamingAiMsg() {
+  const row = document.createElement('div');
+  row.className = 'msg msg-ai';
+  row.innerHTML = `<div class="body"></div>`;
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return { row, body: row.querySelector('.body'), raw: '' };
+}
+
+function updateStreamingAiMsg(stream, textDelta) {
+  stream.raw += textDelta;
+  stream.body.innerHTML = renderMarkdown(parseSuggestions(stream.raw).mainText);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function finalizeStreamingAiMsg(stream) {
+  const { mainText, suggestions } = parseSuggestions(stream.raw);
+  stream.body.innerHTML = renderMarkdown(mainText);
+  if (suggestions.length) {
+    const tray = document.createElement('div');
+    tray.className = 'suggestions';
+    suggestions.forEach(q => {
+      const chip = document.createElement('button');
+      chip.className = 'suggestion-chip';
+      chip.textContent = q;
+      chip.onclick = () => {
+        if (sending) return;
+        inputEl.value = q;
+        sendMessage();
+      };
+      tray.appendChild(chip);
+    });
+    stream.row.appendChild(tray);
+  }
+}
+
+function clearMessages() { messagesEl.innerHTML = ''; }
+
+function renderStoredMessage(m) {
+  if (m.role === 'user') addUserMsg(m.content);
+  else if (m.role === 'tool') addToolMsg(`${m.tool_name || 'tool'}`, m.content);
+  else if (m.role === 'assistant' && m.content) addAiMsg(m.content);
+}
+
+/* ---------- モデル選択 ---------- */
+async function loadModels() {
+  availableModels = await fetchJSON('/api/models');
+  modelSelect.innerHTML = availableModels
+    .map(m => `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)}</option>`)
+    .join('');
+}
+
+modelSelect.addEventListener('change', async () => {
+  if (!currentConvId) return;
+  const model = modelSelect.value;
+  conversationModels[currentConvId] = model;
+  await fetchJSON(`/api/conversations/${currentConvId}/model`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+});
+
+/* ---------- 会話一覧 ---------- */
+async function loadConversations() {
+  const convs = await fetchJSON('/api/conversations');
+  listEl.innerHTML = '';
+  for (const c of convs) {
+    conversationModels[c.id] = c.model;
+    const item = document.createElement('div');
+    item.className = 'conv-item' + (c.id === currentConvId ? ' active' : '');
+    item.dataset.id = c.id;
+    item.innerHTML = `<span class="conv-title">${escapeHtml(c.title)}</span><span class="conv-delete">✕</span>`;
+    item.querySelector('.conv-title').onclick = () => selectConversation(c.id);
+    item.querySelector('.conv-delete').onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('この会話を削除しますか？')) return;
+      await fetchJSON(`/api/conversations/${c.id}`, { method: 'DELETE' });
+      if (currentConvId === c.id) {
+        currentConvId = null;
+        messagesEl.innerHTML = '<div class="empty-state">Start a conversation from "+ new_conversation()" on the left</div>';
+      }
+      loadConversations();
+    };
+    listEl.appendChild(item);
+  }
+  return convs;
+}
+
+async function retitleConversation(id) {
+  try {
+    const res = await fetchJSON(`/api/conversations/${id}/retitle`, { method: 'POST' });
+    const item = listEl.querySelector(`.conv-item[data-id="${id}"] .conv-title`);
+    if (item) item.textContent = res.title;
+  } catch (e) {
+    // 再生成に失敗しても既存タイトルのままで問題ないため無視
+  }
+}
+
+async function selectConversation(id) {
+  currentConvId = id;
+  clearMessages();
+  if (conversationModels[id]) modelSelect.value = conversationModels[id];
+  const msgs = await fetchJSON(`/api/conversations/${id}/messages`);
+  if (msgs.length === 0) {
+    messagesEl.innerHTML = '<div class="empty-state">Send a message to start the conversation</div>';
+  } else {
+    for (const m of msgs) renderStoredMessage(m);
+    retitleConversation(id);
+  }
+  loadConversations();
+  collapseSidebarOnMobile();
+}
+
+async function createConversation() {
+  const model = modelSelect.value || undefined;
+  const { id } = await fetchJSON('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+  });
+  await loadConversations();
+  await selectConversation(id);
+  inputEl.focus();
+}
+
+/* ---------- メッセージ送信(保存→生成の2段階、生成中は中断可能) ---------- */
+let currentAbortController = null;
+
+function setSendingUI(isSending) {
+  sending = isSending;
+  sendBtn.textContent = isSending ? 'stop' : 'send';
+  sendBtn.classList.toggle('stop-mode', isSending);
+  inputEl.disabled = isSending;
+}
+
+function removeLastUserMsg() {
+  const rows = messagesEl.querySelectorAll('.msg.msg-user');
+  const last = rows[rows.length - 1];
+  if (last) last.remove();
+}
+
+async function sendMessage() {
+  const text = inputEl.value.trim();
+  if ((!text && pendingAttachments.length === 0) || sending) return;
+  if (!currentConvId) await createConversation();
+
+  setSendingUI(true);
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+
+  if (messagesEl.querySelector('.empty-state')) clearMessages();
+
+  const attachmentsToSend = pendingAttachments;
+  pendingAttachments = [];
+  renderAttachmentTray();
+
+  let userMsgId;
+  try {
+    const saved = await fetchJSON(`/api/conversations/${currentConvId}/user-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text, attachments: attachmentsToSend }),
+    });
+    userMsgId = saved.id;
+  } catch (err) {
+    addToolMsg('エラー', err.message);
+    setSendingUI(false);
+    return;
+  }
+
+  addUserMsg(text || '(添付ファイルのみ)', attachmentsToSend);
+  statusBar.textContent = 'thinking...';
+
+  currentAbortController = new AbortController();
+  let streaming = null;
+  let toolRow = null;
+  let retitled = false;
+
+  try {
+    const res = await fetch(`/api/conversations/${currentConvId}/generate`, {
+      method: 'POST',
+      signal: currentAbortController.signal,
+    });
+    if (!res.ok) throw new Error(await res.text());
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+
+        if (event.type === 'token') {
+          statusBar.textContent = '';
+          if (!streaming) streaming = beginStreamingAiMsg();
+          updateStreamingAiMsg(streaming, event.text);
+        } else if (event.type === 'tool_call') {
+          statusBar.textContent = '';
+          if (streaming) { finalizeStreamingAiMsg(streaming); streaming = null; }
+          toolRow = addToolMsg(`${event.name}(${JSON.stringify(event.arguments)})`, null);
+        } else if (event.type === 'tool_result') {
+          appendToolResult(toolRow, event.content);
+          toolRow = null;
+        } else if (event.type === 'retry') {
+          statusBar.textContent = 'thinking...';
+          if (streaming) { finalizeStreamingAiMsg(streaming); streaming = null; }
+        } else if (event.type === 'done') {
+          if (streaming) { finalizeStreamingAiMsg(streaming); streaming = null; }
+          if (event.title) retitled = true;
+        }
+      }
+    }
+    if (retitled) await loadConversations();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      try {
+        await fetchJSON(`/api/conversations/${currentConvId}/messages/${userMsgId}`, { method: 'DELETE' });
+      } catch (e) {}
+      if (streaming) streaming.row.remove();
+      removeLastUserMsg();
+      inputEl.value = text;
+      pendingAttachments = attachmentsToSend;
+      renderAttachmentTray();
+    } else {
+      addToolMsg('エラー', err.message);
+    }
+  } finally {
+    statusBar.textContent = '';
+    setSendingUI(false);
+    currentAbortController = null;
+    inputEl.style.height = 'auto';
+    inputEl.style.height = inputEl.scrollHeight + 'px';
+    inputEl.focus();
+  }
+}
+
+/* ---------- 添付ファイル ---------- */
+function renderAttachmentTray() {
+  attachmentTray.innerHTML = '';
+  pendingAttachments.forEach((a, idx) => {
+    const card = buildAttachCard(a);
+    const remove = document.createElement('span');
+    remove.className = 'remove';
+    remove.textContent = '✕';
+    remove.onclick = () => {
+      if (a.objectUrl) URL.revokeObjectURL(a.objectUrl);
+      pendingAttachments.splice(idx, 1);
+      renderAttachmentTray();
+    };
+    card.appendChild(remove);
+    attachmentTray.appendChild(card);
+  });
+}
+
+async function handleFiles(fileList) {
+  if (!fileList || !fileList.length) return;
+  if (!currentConvId) await createConversation();
+  for (const file of fileList) {
+    statusBar.textContent = `アップロード中: ${file.name}...`;
+    const kind = fileKind(file.name);
+    const objectUrl = kind === 'image' ? URL.createObjectURL(file) : null;
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch(`/api/conversations/${currentConvId}/attachments`, { method: 'POST', body: form });
+      const data = await res.json();
+      pendingAttachments.push({ ...data, kind, objectUrl });
+      renderAttachmentTray();
+    } catch (err) {
+      addToolMsg('添付エラー', err.message);
+    }
+  }
+  statusBar.textContent = '';
+}
+
+attachBtn.onclick = () => fileInput.click();
+fileInput.onchange = () => {
+  handleFiles(fileInput.files);
+  fileInput.value = '';
+};
+
+/* ---------- ドラッグ&ドロップ ---------- */
+let dragCounter = 0;
+mainEl.addEventListener('dragenter', (e) => {
+  e.preventDefault();
+  dragCounter++;
+  mainEl.classList.add('drag-over');
+});
+mainEl.addEventListener('dragover', (e) => e.preventDefault());
+mainEl.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dragCounter = Math.max(0, dragCounter - 1);
+  if (dragCounter === 0) mainEl.classList.remove('drag-over');
+});
+mainEl.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragCounter = 0;
+  mainEl.classList.remove('drag-over');
+  handleFiles(e.dataTransfer.files);
+});
+
+/* ---------- ツールパネル ---------- */
+async function loadTools() {
+  try {
+    const tools = await fetchJSON('/api/tools');
+    toolsCount.textContent = tools.length ? `(${tools.length})` : '';
+    if (tools.length === 0) {
+      toolsList.innerHTML = '<div class="tool-empty">接続中のMCPサーバーはありません。config/servers.json に追加すると、ここに表示されます。</div>';
+      return;
+    }
+    toolsList.innerHTML = '';
+    tools.forEach((t) => {
+      const card = document.createElement('div');
+      card.className = 'tool-card';
+      card.innerHTML = `
+        <div class="tool-name">${escapeHtml(t.name)}</div>
+        <div class="tool-desc">${escapeHtml(t.description || '(説明なし)')}</div>
+        <button class="tool-run-toggle">▶ 手動実行</button>
+        <div class="tool-run-box">
+          <textarea placeholder='{"引数名": "値"}'></textarea>
+          <button class="tool-run-exec">実行</button>
+        </div>
+      `;
+      const toggleBtn = card.querySelector('.tool-run-toggle');
+      const runBox = card.querySelector('.tool-run-box');
+      toggleBtn.onclick = () => runBox.classList.toggle('open');
+      card.querySelector('.tool-run-exec').onclick = async () => {
+        if (!currentConvId) await createConversation();
+        const textarea = runBox.querySelector('textarea');
+        let args = {};
+        if (textarea.value.trim()) {
+          try { args = JSON.parse(textarea.value); }
+          catch (e) { alert('引数はJSON形式で入力してください: ' + e.message); return; }
+        }
+        addToolMsg(`手動実行: ${t.name}(${JSON.stringify(args)})`, null);
+        try {
+          const res = await fetchJSON(`/api/conversations/${currentConvId}/tools/${t.name}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ arguments: args }),
+          });
+          addToolMsg(`${t.name} 結果`, res.result);
+        } catch (err) {
+          addToolMsg('エラー', err.message);
+        }
+      };
+      toolsList.appendChild(card);
+    });
+  } catch (err) {
+    toolsList.innerHTML = `<div class="tool-empty">ツール一覧の取得に失敗しました: ${err.message}</div>`;
+  }
+}
+
+toolsToggle.onclick = () => {
+  toolsPanel.classList.toggle('open');
+  if (toolsPanel.classList.contains('open')) loadTools();
+};
+document.getElementById('tools-panel-close').onclick = () => toolsPanel.classList.remove('open');
+
+/* ---------- ツール追加 ---------- */
+document.getElementById('tool-add-submit').onclick = async () => {
+  const name = document.getElementById('tool-add-name').value.trim();
+  const command = document.getElementById('tool-add-command').value.trim();
+  const argsRaw = document.getElementById('tool-add-args').value.trim();
+  const statusEl = document.getElementById('tool-add-status');
+
+  if (!name || !command) {
+    statusEl.textContent = '名前とコマンドは必須です';
+    statusEl.className = 'error';
+    return;
+  }
+
+  statusEl.textContent = '接続中...';
+  statusEl.className = '';
+  try {
+    const res = await fetchJSON('/api/mcp-servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, command, args: argsRaw ? argsRaw.split(/\s+/) : [] }),
+    });
+    statusEl.textContent = `接続成功: ${res.tools_added.length}個のツールを追加しました`;
+    statusEl.className = 'ok';
+    document.getElementById('tool-add-name').value = '';
+    document.getElementById('tool-add-command').value = '';
+    document.getElementById('tool-add-args').value = '';
+    loadTools();
+  } catch (err) {
+    statusEl.textContent = `エラー: ${err.message}`;
+    statusEl.className = 'error';
+  }
+};
+
+/* ---------- サイドバー開閉 ---------- */
+const MOBILE_BREAKPOINT = 680;
+const isMobileViewport = () => window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`).matches;
+function applySidebarState(collapsed) {
+  sidebarEl.classList.toggle('collapsed', collapsed);
+}
+sidebarToggle.onclick = () => {
+  const collapsed = !sidebarEl.classList.contains('collapsed');
+  applySidebarState(collapsed);
+  try { localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+};
+function collapseSidebarOnMobile() {
+  if (isMobileViewport()) {
+    applySidebarState(true);
+    try { localStorage.setItem('sidebarCollapsed', '1'); } catch (e) {}
+  }
+}
+
+/* ---------- 設定パネル(テーマ切替) ---------- */
+function applyTheme(light) {
+  document.body.classList.toggle('theme-light', light);
+  themeSwitch.classList.toggle('on', light);
+}
+settingsToggle.onclick = (e) => {
+  e.stopPropagation();
+  settingsPanel.classList.toggle('open');
+};
+document.addEventListener('click', (e) => {
+  if (!settingsPanel.contains(e.target) && e.target !== settingsToggle) {
+    settingsPanel.classList.remove('open');
+  }
+});
+themeSwitch.onclick = () => {
+  const light = !themeSwitch.classList.contains('on');
+  applyTheme(light);
+  try { localStorage.setItem('theme', light ? 'light' : 'dark'); } catch (e) {}
+};
+
+/* ---------- /コマンド ヒント & オートコンプリート ---------- */
+async function fetchCommands() {
+  try {
+    availableCommands = await fetchJSON('/api/commands');
+  } catch (e) {
+    availableCommands = [];
+  }
+  renderCommandHint();
+}
+
+function renderCommandHint() {
+  const hintEl = document.getElementById('command-hint');
+  if (!availableCommands.length) { hintEl.textContent = ''; return; }
+  hintEl.innerHTML = '使えるコマンド: ' + availableCommands.map(c => `<span class="cmd">/${c}</span>`).join(' ');
+}
+
+function getPartialCommandToken() {
+  const pos = inputEl.selectionStart;
+  const before = inputEl.value.slice(0, pos);
+  const m = before.match(/(?:^|[\s])\/(\w*)$/);
+  return m ? m[1] : null;
+}
+
+function updateCommandAutocomplete() {
+  const partial = getPartialCommandToken();
+  if (partial === null || !availableCommands.length) { closeCommandAutocomplete(); return; }
+  commandMatches = availableCommands.filter(c => c.startsWith(partial.toLowerCase()));
+  if (!commandMatches.length) { closeCommandAutocomplete(); return; }
+  activeCommandIndex = 0;
+  renderCommandAutocomplete();
+}
+
+function renderCommandAutocomplete() {
+  const box = document.getElementById('command-autocomplete');
+  box.innerHTML = '';
+  commandMatches.forEach((c, i) => {
+    const item = document.createElement('div');
+    item.className = 'cmd-item' + (i === activeCommandIndex ? ' active' : '');
+    item.textContent = '/' + c;
+    item.onclick = () => selectCommand(c);
+    box.appendChild(item);
+  });
+  box.classList.add('open');
+  autocompleteOpen = true;
+}
+
+function closeCommandAutocomplete() {
+  const box = document.getElementById('command-autocomplete');
+  box.classList.remove('open');
+  box.innerHTML = '';
+  autocompleteOpen = false;
+  commandMatches = [];
+  activeCommandIndex = -1;
+}
+
+function moveActiveCommand(delta) {
+  if (!commandMatches.length) return;
+  activeCommandIndex = (activeCommandIndex + delta + commandMatches.length) % commandMatches.length;
+  renderCommandAutocomplete();
+}
+
+function selectActiveCommand() {
+  if (activeCommandIndex < 0 || !commandMatches[activeCommandIndex]) return;
+  selectCommand(commandMatches[activeCommandIndex]);
+}
+
+function selectCommand(name) {
+  const pos = inputEl.selectionStart;
+  const before = inputEl.value.slice(0, pos);
+  const after = inputEl.value.slice(pos);
+  const newBefore = before.replace(/(?:^|[\s])\/(\w*)$/, (match) => {
+    const leading = match.startsWith('/') ? '' : match[0];
+    return `${leading}/${name} `;
+  });
+  inputEl.value = newBefore + after;
+  const newPos = newBefore.length;
+  closeCommandAutocomplete();
+  inputEl.focus();
+  inputEl.setSelectionRange(newPos, newPos);
+}
+
+/* ---------- イベント ---------- */
+document.getElementById('new-chat-btn').onclick = createConversation;
+sendBtn.onclick = () => {
+  if (sending && currentAbortController) {
+    currentAbortController.abort();
+  } else {
+    sendMessage();
+  }
+};
+inputEl.addEventListener('input', () => {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = inputEl.scrollHeight + 'px';
+  if (/\n\n$/.test(inputEl.value)) {
+    inputEl.value = inputEl.value.replace(/\n+$/, '');
+    inputEl.style.height = 'auto';
+    closeCommandAutocomplete();
+    sendMessage();
+    return;
+  }
+  updateCommandAutocomplete();
+});
+inputEl.addEventListener('keydown', (e) => {
+  if (!autocompleteOpen) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); moveActiveCommand(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); moveActiveCommand(-1); }
+  else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectActiveCommand(); }
+  else if (e.key === 'Escape') { closeCommandAutocomplete(); }
+});
+
+/* ---------- 実ビューポート高さの同期(iOS Safariのソフトキーボード開閉対策) ---------- */
+/* CSSのdvhだけだとキーボード開閉時に再計算がズレて表示が崩れることがあるため、
+   実際に見えている高さ(visualViewport優先)をJSで--app-heightに反映する。 */
+function syncAppHeight() {
+  const h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+  document.documentElement.style.setProperty('--app-height', `${h}px`);
+}
+syncAppHeight();
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncAppHeight);
+} else {
+  window.addEventListener('resize', syncAppHeight);
+}
+
+(async function init() {
+  try {
+    const storedCollapsed = localStorage.getItem('sidebarCollapsed');
+    if (storedCollapsed === '1') applySidebarState(true);
+    else if (storedCollapsed === null && isMobileViewport()) applySidebarState(true);
+    if (localStorage.getItem('theme') === 'light') applyTheme(true);
+  } catch (e) {}
+  await loadModels();
+  const convs = await loadConversations();
+  if (convs.length > 0) await selectConversation(convs[0].id);
+  loadTools();
+  fetchCommands();
+})();
+</script>
+
+</body>
+</html>
