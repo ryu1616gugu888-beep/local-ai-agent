@@ -49,6 +49,16 @@ MARKET_INDICES = ["日経平均", "TOPIX", "ドル円", "ダウ平均", "NASDAQ"
 # 枠切れで欠ける。分けることでレポート用の枠を丸ごと確保する。
 REPORT_MODEL = "gemini-3.8-flash"
 
+# 代替モデル。単一モデルに固定すると、そのモデルが落ちている日に配信が丸ごと空になる。
+# 実際に gemini-3.8-flash は335字の小さなリクエストでも503を返す状態が観測されており
+# (枠切れではなくモデル側の過負荷)、その時間帯でも 3.7-flash と 3.5-flash-lite は
+# 正常に応答していた。品質順に並べ、上から順に試す。
+REPORT_MODEL_FALLBACKS = ["gemini-3.7-flash", "gemini-3.5-flash-lite"]
+
+# フォールバックがあるので、1モデルあたりのリトライは浅くする。
+# 落ちているモデルを5回叩くより、次のモデルへ移る方が速く消費も少ない。
+_RETRIES_PER_MODEL = 2
+
 VAULT_DIR = Path.home() / "Documents" / "Obsidian Vault" / "朝夕レポート"
 GMAIL_PROFILES = ["main", "lulu20173170", "4123146"]
 
@@ -611,9 +621,28 @@ Gmail(受信メール)のセクションも含まれていますが、週次ま�
     # 一度300秒まで短縮したが、9,000字規模の生成がそれを超えて失敗したため戻した。
     # 短いグループは30〜120秒で返るので、長い方に合わせても実害はない。
     max_chars = _SECTION_MAX_CHARS if section is not None else 40000
-    return _gemini._call_gemini(
-        [{"text": prompt}], timeout=480, max_answer_chars=max_chars, model=REPORT_MODEL
-    )
+    return _call_with_fallback(prompt, timeout=480, max_answer_chars=max_chars)
+
+
+def _call_with_fallback(prompt: str, *, timeout: int, max_answer_chars: int) -> str:
+    """レポート用モデルを優先順に試し、最初に成功したものの結果を返す。
+
+    どのモデルを使ったかは必ずログに残す。品質が落ちる代替モデルに切り替わったことに
+    気づけないまま「なぜか今日のレポートは薄い」と悩む事態を避けるため。
+    """
+    last = ""
+    for i, model in enumerate([REPORT_MODEL, *REPORT_MODEL_FALLBACKS]):
+        out = _gemini._call_gemini(
+            [{"text": prompt}], timeout=timeout, max_answer_chars=max_answer_chars,
+            model=model, max_retries=_RETRIES_PER_MODEL,
+        )
+        if not out.startswith("Gemini APIエラー"):
+            if i:
+                logging.warning("代替モデル %s で生成しました(本来は %s)", model, REPORT_MODEL)
+            return out
+        last = out
+        logging.warning("モデル %s での生成に失敗: %s", model, out[:150])
+    return last
 
 
 async def _synthesize_report_by_section(
@@ -804,12 +833,18 @@ async def generate_report(mode: str = "manual", topic: str = "") -> str:
         _quotes_block("日本(日経平均・TOPIX・ドル円)", ["日経平均", "TOPIX", "ドル円"])
         _quotes_block("海外(ダウ・NASDAQ・S&P500)", ["ダウ平均", "NASDAQ", "S&P500"])
 
-        # 自動配信(scheduled_*)は15〜30分の分量を確実に確保するため、各媒体からより
-        # 多くの記事を取得する。手動(manual)はオンデマンドなので控えめでよい。
+        # 自動配信(scheduled_*)は分量を確保するため、各媒体からより多くの記事を
+        # 取得する。手動(manual)はオンデマンドなので控えめでよい。
         article_limit = 10 if mode.startswith("scheduled") else 6
 
+        # NHKだけ本数を多く取る。1記事あたりの実質的な本文量が他媒体よりかなり少なく
+        # (実測: NHK 約1,900字/本に対しFTは約6,250字/本。しかもNHK側はナビゲーションの
+        # 定型文がかなりの割合を占める)、同じ本数では「日本ニュース」セクションだけが
+        # 薄くなるため。トップページには常時30本以上のリンクがある。
+        nhk_limit = article_limit * 2
+
         for label, fetch_fn in [
-            ("NHK", lambda: _fetch_nhk(limit=article_limit)),
+            ("NHK", lambda: _fetch_nhk(limit=nhk_limit)),
             ("FT", lambda: _fetch_ft(limit=article_limit)),
             ("NYT", lambda: _fetch_nyt(limit=article_limit)),
             ("WSJ", lambda: _fetch_wsj(limit=article_limit)),

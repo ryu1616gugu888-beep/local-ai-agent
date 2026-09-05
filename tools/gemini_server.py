@@ -70,6 +70,7 @@ def _call_gemini(
     timeout: int = TIMEOUT_SEC,
     max_answer_chars: int = MAX_ANSWER_CHARS,
     model: str | None = None,
+    max_retries: int | None = None,
 ) -> str:
     """Gemini APIを呼ぶ。model省略時はMODEL(チャット用)を使う。
 
@@ -81,9 +82,12 @@ def _call_gemini(
     if not API_KEY:
         return "エラー: GEMINI_API_KEYが設定されていません。"
 
+    # 呼び出し側に代替モデルへのフォールバックがある場合、落ちているモデルを
+    # 何度も叩くより早く諦めて次のモデルへ移った方が速く、消費リクエストも少ない。
+    retries = MAX_RETRIES if max_retries is None else max_retries
     resp = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        is_last = attempt == MAX_RETRIES
+    for attempt in range(1, retries + 1):
+        is_last = attempt == retries
         try:
             resp = requests.post(
                 API_URL_TEMPLATE.format(model=model or MODEL),
@@ -130,7 +134,7 @@ def _call_gemini(
             if getattr(e, "response", None) is not None:
                 detail = f" ({e.response.text[:300]})"
             # ヘッダ認証に変えた後もURL以外の経路でキーが混ざる可能性を潰しておく。
-            return _redact(f"Gemini APIエラー({MAX_RETRIES}回試行): {e}{detail}")
+            return _redact(f"Gemini APIエラー({retries}回試行): {e}{detail}")
 
     data = resp.json()
     try:
