@@ -19,7 +19,8 @@ from mcp.server.mcpserver import MCPServer
 
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL = "gemini-3.5-flash"
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
+API_URL_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+API_URL = API_URL_TEMPLATE.format(model=MODEL)
 TIMEOUT_SEC = 30
 MAX_ANSWER_CHARS = 6000
 MAX_RETRIES = 5  # 無料枠は「高負荷」で503が出やすいため、自動リトライする
@@ -64,7 +65,19 @@ def _is_daily_quota_error(resp) -> bool:
     return False
 
 
-def _call_gemini(parts: list[dict], timeout: int = TIMEOUT_SEC, max_answer_chars: int = MAX_ANSWER_CHARS) -> str:
+def _call_gemini(
+    parts: list[dict],
+    timeout: int = TIMEOUT_SEC,
+    max_answer_chars: int = MAX_ANSWER_CHARS,
+    model: str | None = None,
+) -> str:
+    """Gemini APIを呼ぶ。model省略時はMODEL(チャット用)を使う。
+
+    無料枠の1日あたりリクエスト数はモデル単位で別々に管理される
+    (quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier)ため、
+    朝夕レポートのように1回の実行で何度も呼ぶ処理は別モデルを指定して、
+    チャットからの利用と枠を奪い合わないようにする。
+    """
     if not API_KEY:
         return "エラー: GEMINI_API_KEYが設定されていません。"
 
@@ -73,7 +86,7 @@ def _call_gemini(parts: list[dict], timeout: int = TIMEOUT_SEC, max_answer_chars
         is_last = attempt == MAX_RETRIES
         try:
             resp = requests.post(
-                API_URL,
+                API_URL_TEMPLATE.format(model=model or MODEL),
                 # APIキーはURLクエリ(?key=)ではなくヘッダで渡す。クエリに載せると
                 # requestsの例外メッセージにURLごと含まれ、その文字列がレポート本文に
                 # 書き出されてObsidian経由でiPhoneまで同期されてしまうため

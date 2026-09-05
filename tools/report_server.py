@@ -43,6 +43,12 @@ import gmail_server as _gmail  # noqa: E402
 # 数値を載せられるよう、主要指数・為替を直接取得する(yfinance、無料・APIキー不要)。
 MARKET_INDICES = ["日経平均", "TOPIX", "ドル円", "ダウ平均", "NASDAQ", "S&P500"]
 
+# レポート生成専用のGeminiモデル。チャット側(gemini_server.MODEL)とは別にしている。
+# 無料枠の「1日あたりリクエスト数」はモデル単位の別枠(実測20回/日)なので、
+# 同じモデルを共用すると、チャットでGeminiを数回使った日に翌朝のレポートが
+# 枠切れで欠ける。分けることでレポート用の枠を丸ごと確保する。
+REPORT_MODEL = "gemini-3.8-flash"
+
 VAULT_DIR = Path.home() / "Documents" / "Obsidian Vault" / "朝夕レポート"
 GMAIL_PROFILES = ["main", "lulu20173170", "4123146"]
 
@@ -605,7 +611,9 @@ Gmail(受信メール)のセクションも含まれていますが、週次ま�
     # 一度300秒まで短縮したが、9,000字規模の生成がそれを超えて失敗したため戻した。
     # 短いグループは30〜120秒で返るので、長い方に合わせても実害はない。
     max_chars = _SECTION_MAX_CHARS if section is not None else 40000
-    return _gemini._call_gemini([{"text": prompt}], timeout=480, max_answer_chars=max_chars)
+    return _gemini._call_gemini(
+        [{"text": prompt}], timeout=480, max_answer_chars=max_chars, model=REPORT_MODEL
+    )
 
 
 async def _synthesize_report_by_section(
