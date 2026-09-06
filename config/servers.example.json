@@ -84,6 +84,11 @@
         "PERPLEXITY_COOKIES": "YOUR_PERPLEXITY_COOKIES_HERE"
       }
     },
+    "claude_code": {
+      "command": "/Users/luca/.local/bin/claude",
+      "args": ["mcp", "serve"],
+      "tools": ["Agent"]
+    },
     "slides": {
       "command": "/Users/luca/local-ai-agent/venv/bin/python3",
       "args": [
